@@ -49,29 +49,50 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 python app.py
 ```
 
-Open `http://localhost:5000/` to see live updates.
+Open `http://localhost:5001/` to see live updates.
 
-If port 5000 is already in use, start the app on another port:
+## Stress simulator and operations dashboard
+
+With Redis, the worker, and the app running, open
+`http://localhost:5001/dashboard` for live throughput, rejection, and latency
+charts. The dashboard receives `event_processed` and `event_rejected` telemetry
+over Socket.IO; it keeps a 30-second window and uses non-animated chart updates
+for high event rates.
+
+In a fourth terminal (with the same virtual environment active), run the Faker
+supplier simulator. It signs every webhook with `SUPPLIER_SECRET_WEBHOOK_KEY`,
+uses a deliberately small product pool to force contention, and injects older
+versions to exercise stale/tombstone decisions:
+
+```bash
+python simulator.py --rate 150 --workers 24 --pool-size 20
+```
+
+Use `Ctrl+C` to stop it. Set `--duration 60` for a bounded one-minute run, or
+override the destination and secret with `SIMULATOR_URL` and
+`SUPPLIER_SECRET_WEBHOOK_KEY`.
+
+To override the default port 5001, set `PORT` before starting the app:
 
 ```powershell
-$env:PORT = "5001"
+$env:PORT = "5002"
 .\.venv\Scripts\python.exe app.py
 ```
 
-Then open `http://localhost:5001/`.
+Then open `http://localhost:5002/`.
 
 ## Ingest a catalog
 
 The format is accepted as `?format=` or `X-Catalog-Format`. The upload field is `file`.
 
 ```powershell
-curl.exe -X POST "http://localhost:5000/api/v1/ingest?format=csv" -F "file=@catalog.csv"
+curl.exe -X POST "http://localhost:5001/api/v1/ingest?format=csv" -F "file=@catalog.csv"
 ```
 
 Response: `202 Accepted` with a `task_id`. Check processing with:
 
 ```powershell
-curl.exe http://localhost:5000/api/v1/tasks/<task_id>
+curl.exe http://localhost:5001/api/v1/tasks/<task_id>
 ```
 
 ## Supplier webhooks
@@ -81,9 +102,12 @@ hex digest, optionally prefixed with `sha256=`, in `X-Supplier-Signature`. The
 secret defaults to `mock-supplier-webhook-secret` and can be changed with
 `SUPPLIER_SECRET_WEBHOOK_KEY`.
 
-Supported events are `inventory.changed` and `price.changed`. Event data may be
+Supported events are `product.created`, `price.changed`, `inventory.changed`,
+`metadata.changed`, `category.moved`, and `product.deleted`. Event data may be
 under `data` or `product` and must include `id` (or `product_id`/`sku`) plus the
-event-specific value:
+event-specific value. Send `version` or ISO-8601 `updated_at` on every event: a
+Redis optimistic transaction rejects older updates, and a deletion tombstone
+prevents an older create from resurrecting a hard-deleted product.
 
 ```json
 {"event_type":"inventory.changed","data":{"product_id":"abc","inventory":12}}
@@ -92,6 +116,11 @@ event-specific value:
 POST these payloads to `/api/v1/webhooks/supplier`. Accepted events are placed
 on the `priority_updates` queue (configurable with `REDIS_PRIORITY_QUEUE`) and
 return `202 Accepted`. Start Redis locally with `docker compose up -d redis`.
+
+The page at `/` is a mock supplier client. It joins the `default` category room,
+offers create/price/inventory/delete controls, and signs each test request with
+the secret in its input. Clicking **Mock create** first lets the page join that
+product's room; subsequent price and inventory changes flash the card.
 
 CSV requires `id,title,price,qty`. JSON-LD accepts Schema.org `Product` objects with `sku` or `productID`, `name`, and `offers.price`. XML expects `<products><product>...</product></products>` with `id`, `name`/`title`, `price`, and `inventory`/`qty` fields.
 

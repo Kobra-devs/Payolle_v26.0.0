@@ -15,10 +15,20 @@
     article.flash { background: #fff4bf; }
     article strong { font-size: 1.1rem; } time { display: block; color: #61717d; font-size: .8rem; margin-top: .4rem; }
     .empty { color: #61717d; }
+    #actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.25rem 0; }
+    button, input { border: 1px solid #aebcc7; border-radius: 4px; padding: .5rem .65rem; background: white; }
+    button { cursor: pointer; background: #164e63; color: white; border-color: #164e63; }
   </style>
 </head>
 <body>
   <header><h1>Live product updates</h1><span id="status">Connecting...</span></header>
+  <section id="actions" aria-label="Mock supplier actions">
+    <input id="secret" aria-label="Webhook secret" value="mock-supplier-webhook-secret">
+    <button data-action="create">Mock create</button>
+    <button data-action="price">Mock price change</button>
+    <button data-action="inventory">Mock inventory change</button>
+    <button data-action="delete">Mock delete</button>
+  </section>
   <main id="updates"><p class="empty">Waiting for the first product change.</p></main>
   <script>
     const status = document.querySelector('#status');
@@ -34,10 +44,39 @@
       card.innerHTML = `<strong>${escapeHtml(product.name || product.id)}</strong> <span>#${escapeHtml(product.id)}</span><br>Price: ${product.price == null ? '-' : Number(product.price).toFixed(2)} | Inventory: ${product.inventory ?? '-'}<time>${escapeHtml(product.updated_at || '')}</time>`;
       if (product.event_type === 'price.changed') { card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 700); }
     }
-    socket.on('product_changed', renderProduct);
+    socket.on('product_changed', (event) => renderProduct(event.product || event));
     socket.on('category_changed', (event) => {
-      if (event.event_type === 'product.deleted') document.querySelector(`[data-product-id="${CSS.escape(event.id)}"]`)?.remove();
-      if (event.event_type === 'product.created' && event.fields) { renderProduct({ ...event.fields, id: event.id }); socket.emit('join_product_room', event.id); }
+      if (event.event_type === 'product.deleted') removeProduct(event.id);
+      if (event.event_type === 'product.created') { renderProduct(event.product || { ...event.fields, id: event.id }); socket.emit('join_product_room', event.id); }
+      if (event.event_type === 'category.moved') {
+        if (event.new_category === 'default') renderProduct(event.product || { id: event.id });
+        if (event.old_category === 'default' && event.new_category !== 'default') removeProduct(event.id);
+      }
+    });
+    function removeProduct(id) {
+      document.querySelector(`[data-product-id="${CSS.escape(id)}"]`)?.remove();
+      if (!updates.children.length) updates.innerHTML = '<p class="empty">No products in this category.</p>';
+    }
+    async function sign(body) {
+      const bytes = new TextEncoder().encode(body);
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(document.querySelector('#secret').value), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      return [...new Uint8Array(await crypto.subtle.sign('HMAC', key, bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    async function sendMock(action) {
+      const id = 'demo-coffee';
+      const payloads = {
+        create: { event_type: 'product.created', data: { id, name: 'Demo Coffee', price: 9.5, inventory: 24, categories: ['default'], version: 1 } },
+        price: { event_type: 'price.changed', data: { id, price: +(8 + Math.random() * 4).toFixed(2), version: Date.now() } },
+        inventory: { event_type: 'inventory.changed', data: { id, inventory: Math.floor(Math.random() * 50), version: Date.now() } },
+        delete: { event_type: 'product.deleted', data: { id, categories: ['default'], version: Date.now() } },
+      };
+      const body = JSON.stringify(payloads[action]);
+      const response = await fetch('/api/v1/webhooks/supplier', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Supplier-Signature': await sign(body) }, body });
+      if (!response.ok) alert(`Mock event failed: ${await response.text()}`);
+    }
+    document.querySelector('#actions').addEventListener('click', event => {
+      const action = event.target.dataset.action;
+      if (action) sendMock(action);
     });
     function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
   </script>

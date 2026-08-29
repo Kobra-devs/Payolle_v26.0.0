@@ -25,10 +25,15 @@ def broadcast_update(socketio, update: dict) -> None:
     if event_type in {"price.changed", "inventory.changed", "metadata.changed"}:
         socketio.emit("product_changed", update, room=f"product_{update['id']}")
     elif event_type in {"product.created", "product.deleted", "category.moved"}:
-        categories = update.get("categories", [])
+        categories = list(update.get("categories", []))
         if update.get("new_category"):
             categories.append(update["new_category"])
         if update.get("old_category"):
             categories.append(update["old_category"])
         for category in set(categories):
             socketio.emit("category_changed", update, room=f"category_{category}")
+
+
+def broadcast_telemetry(socketio, telemetry: dict) -> None:
+    """Telemetry is intentionally global: the operations dashboard observes all IDs."""
+    socketio.emit(telemetry["telemetry"], telemetry)

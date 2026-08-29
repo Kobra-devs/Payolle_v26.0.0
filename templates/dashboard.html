@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalog Operations Dashboard</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root { font-family: Inter, system-ui, sans-serif; color: #e5edf5; background: #101827; }
+    body { max-width: 1200px; margin: 0 auto; padding: 2rem; } header { display:flex; justify-content:space-between; align-items:center; }
+    h1 { margin:0; font-size:1.65rem; } #status { color:#fbbf24; font-weight:700; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(430px,1fr)); gap:1.25rem; margin-top:1.5rem; }
+    section { background:#192235; border:1px solid #2c3a52; border-radius:10px; padding:1rem; } h2 { font-size:1rem; margin:0 0 1rem; } .stats { display:flex; gap:1rem; color:#aebdd0; font-size:.9rem; }
+    canvas { max-height:330px; }
+  </style>
+</head>
+<body>
+  <header><div><h1>Catalog operations</h1><div class="stats"><span id="successes">0 processed</span><span id="rejections">0 rejected</span></div></div><span id="status">Connecting…</span></header>
+  <main class="grid">
+    <section><h2>Ingestion throughput — rolling 30 seconds</h2><canvas id="throughput"></canvas></section>
+    <section><h2>Processing latency — five most volatile products</h2><canvas id="latency"></canvas></section>
+  </main>
+  <script>
+    const WINDOW_SECONDS = 30;
+    const buckets = new Map();
+    const productMetrics = new Map();
+    let totals = { processed: 0, rejected: 0 }, pendingDraw = false;
+    const throughput = new Chart(document.querySelector('#throughput'), {
+      type: 'line', data: { labels: [], datasets: [
+        { label: 'Processed / sec', data: [], borderColor: '#34d399', backgroundColor: '#34d399', tension: .25, pointRadius: 0 },
+        { label: 'Rejected / sec', data: [], borderColor: '#fb7185', backgroundColor: '#fb7185', tension: .25, pointRadius: 0 },
+      ]}, options: { responsive:true, animation:false, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+    });
+    const latency = new Chart(document.querySelector('#latency'), {
+      type: 'bar', data: { labels: [], datasets: [{ label: 'Mean arrival latency (ms)', data: [], backgroundColor: '#60a5fa' }] },
+      options: { indexAxis:'y', responsive:true, animation:false, scales:{ x:{ beginAtZero:true } } }
+    });
+    function record(message) {
+      const now = Date.now(), second = Math.floor(now / 1000);
+      const bucket = buckets.get(second) || { processed:0, rejected:0 };
+      bucket[message.telemetry === 'event_processed' ? 'processed' : 'rejected']++;
+      buckets.set(second, bucket);
+      totals[message.telemetry === 'event_processed' ? 'processed' : 'rejected']++;
+      const source = Date.parse(message.source_timestamp || '');
+      if (Number.isFinite(source)) {
+        const metric = productMetrics.get(message.id) || { samples:[], lastSeen:now };
+        metric.samples.push(Math.max(0, now - source));
+        metric.samples = metric.samples.slice(-100); metric.lastSeen = now;
+        productMetrics.set(message.id, metric);
+      }
+      scheduleDraw();
+    }
+    function scheduleDraw() { if (!pendingDraw) { pendingDraw = true; requestAnimationFrame(draw); } }
+    function draw() {
+      pendingDraw = false;
+      const current = Math.floor(Date.now() / 1000), seconds = [];
+      for (let s = current - WINDOW_SECONDS + 1; s <= current; s++) seconds.push(s);
+      for (const key of buckets.keys()) if (key < current - WINDOW_SECONDS) buckets.delete(key);
+      throughput.data.labels = seconds.map(s => new Date(s * 1000).toLocaleTimeString());
+      throughput.data.datasets[0].data = seconds.map(s => (buckets.get(s) || {}).processed || 0);
+      throughput.data.datasets[1].data = seconds.map(s => (buckets.get(s) || {}).rejected || 0);
+      const volatile = [...productMetrics.entries()].sort((a,b) => b[1].samples.length - a[1].samples.length || b[1].lastSeen - a[1].lastSeen).slice(0, 5);
+      latency.data.labels = volatile.map(([id]) => id);
+      latency.data.datasets[0].data = volatile.map(([, metric]) => Math.round(metric.samples.reduce((a,b) => a+b, 0) / metric.samples.length));
+      throughput.update('none'); latency.update('none');
+      document.querySelector('#successes').textContent = `${totals.processed} processed`;
+      document.querySelector('#rejections').textContent = `${totals.rejected} rejected`;
+    }
+    const status = document.querySelector('#status'), socket = io();
+    socket.on('connect', () => { status.textContent = 'Live'; status.style.color = '#34d399'; });
+    socket.on('disconnect', () => { status.textContent = 'Disconnected'; status.style.color = '#fb7185'; });
+    socket.on('event_processed', record);
+    socket.on('event_rejected', record);
+    setInterval(scheduleDraw, 1000);
+  </script>
+</body>
+</html>

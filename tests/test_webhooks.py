@@ -63,3 +63,16 @@ def test_category_move_and_delete_update_sets_and_hash():
     process_supplier_event({"event_type": "product.deleted", "id": "p1", "categories": ["new"], "version": 3}, client)
     assert "product:p1" not in client.hashes
     assert "p1" not in client.sets["category:new"]
+
+
+def test_delete_tombstone_rejects_late_create():
+    client = FakeRedis()
+    process_supplier_event({"event_type": "product.deleted", "id": "p1", "version": 5}, client)
+    accepted = process_supplier_event(
+        {"event_type": "product.created", "id": "p1", "version": 4, "fields": {"name": "Late", "categories": ["default"]}},
+        client,
+    )
+    assert not accepted
+    assert "product:p1" not in client.hashes
+    assert client.published[-1][1]["telemetry"] == "event_rejected"
+    assert client.published[-1][1]["reason"] == "tombstone_active"

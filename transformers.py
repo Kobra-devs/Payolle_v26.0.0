@@ -36,7 +36,7 @@ def transform_event(payload: dict[str, Any]) -> dict[str, Any]:
         "event_type": event_type,
         "id": str(product_id).strip(),
     }
-    for key in ("version", "updated_at"):
+    for key in ("version", "updated_at", "source_timestamp"):
         if key in payload:
             event[key] = payload[key]
         elif key in details:
@@ -49,7 +49,7 @@ def transform_event(payload: dict[str, Any]) -> dict[str, Any]:
         event["fields"] = {
             key: value
             for key, value in fields.items()
-            if key not in {"id", "product_id", "sku", "event_type", "data", "product", "version", "updated_at"}
+            if key not in {"id", "product_id", "sku", "event_type", "data", "product", "version", "updated_at", "source_timestamp"}
         }
         if isinstance(event["fields"].get("categories"), str):
             event["fields"]["categories"] = [event["fields"]["categories"]]

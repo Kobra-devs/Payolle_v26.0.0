@@ -1,3 +1,9 @@
+# Eventlet must patch sockets before Flask-SocketIO, Redis, or threading are
+# imported; Socket.IO's Redis manager otherwise cannot use its pub/sub socket.
+import eventlet
+
+eventlet.monkey_patch()
+
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 from redis.exceptions import RedisError
@@ -27,6 +33,10 @@ def create_app(config_class=Config):
     @app.get("/")
     def index():
         return render_template("index.html")
+
+    @app.get("/dashboard")
+    def dashboard():
+        return render_template("dashboard.html")
 
     @app.get("/health")
     def health():

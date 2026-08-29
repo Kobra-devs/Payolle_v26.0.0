@@ -12,4 +12,4 @@ class Config:
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(10 * 1024 * 1024)))
     TASK_PAYLOAD_TTL_SECONDS = int(os.getenv("TASK_PAYLOAD_TTL_SECONDS", "3600"))
     ENABLE_PUBSUB_BRIDGE = os.getenv("ENABLE_PUBSUB_BRIDGE", "true").lower() == "true"
-    PORT = int(os.getenv("PORT", "5000"))
+    PORT = int(os.getenv("PORT", "5001"))
