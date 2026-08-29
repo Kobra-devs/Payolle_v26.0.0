@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product Update Stream</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root { color-scheme: light; font-family: Georgia, serif; }
+    body { max-width: 760px; margin: 3rem auto; padding: 0 1rem; color: #17202a; background: linear-gradient(135deg, #f4f7f9, #e4eef0); }
+    header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+    h1 { margin: 0; font-size: 1.8rem; } #status { color: #9a3412; font-weight: 600; }
+    #updates { display: grid; gap: .75rem; margin-top: 2rem; }
+    article { background: white; border: 1px solid #d8e0e7; border-radius: 6px; padding: 1rem; box-shadow: 0 2px 8px #17202a12; transition: background .2s; }
+    article.flash { background: #fff4bf; }
+    article strong { font-size: 1.1rem; } time { display: block; color: #61717d; font-size: .8rem; margin-top: .4rem; }
+    .empty { color: #61717d; }
+  </style>
+</head>
+<body>
+  <header><h1>Live product updates</h1><span id="status">Connecting...</span></header>
+  <main id="updates"><p class="empty">Waiting for the first product change.</p></main>
+  <script>
+    const status = document.querySelector('#status');
+    const updates = document.querySelector('#updates');
+    const socket = io();
+    socket.emit('join_category_room', 'default');
+    socket.on('connect', () => { status.textContent = 'Connected'; status.style.color = '#166534'; });
+    socket.on('disconnect', () => { status.textContent = 'Disconnected'; status.style.color = '#9a3412'; });
+    function renderProduct(product) {
+      document.querySelector('.empty')?.remove();
+      let card = document.querySelector(`[data-product-id="${CSS.escape(product.id)}"]`);
+      if (!card) { card = document.createElement('article'); card.dataset.productId = product.id; updates.prepend(card); }
+      card.innerHTML = `<strong>${escapeHtml(product.name || product.id)}</strong> <span>#${escapeHtml(product.id)}</span><br>Price: ${product.price == null ? '-' : Number(product.price).toFixed(2)} | Inventory: ${product.inventory ?? '-'}<time>${escapeHtml(product.updated_at || '')}</time>`;
+      if (product.event_type === 'price.changed') { card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 700); }
+    }
+    socket.on('product_changed', renderProduct);
+    socket.on('category_changed', (event) => {
+      if (event.event_type === 'product.deleted') document.querySelector(`[data-product-id="${CSS.escape(event.id)}"]`)?.remove();
+      if (event.event_type === 'product.created' && event.fields) { renderProduct({ ...event.fields, id: event.id }); socket.emit('join_product_room', event.id); }
+    });
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+  </script>
+</body>
+</html>
