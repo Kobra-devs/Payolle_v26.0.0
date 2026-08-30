@@ -147,7 +147,7 @@ Docker is used to run Redis in a containerized way. The repo includes a docker-c
 ### 1. Clone the project
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/kobra-devs/Payolle_v26.0.0
 cd Payolle_v26.0.0
 ```
 
